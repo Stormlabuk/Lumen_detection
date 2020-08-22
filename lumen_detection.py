@@ -1,17 +1,26 @@
 #!/usr/bin/env python
-from __future__ import division
+
+"""
+Author: James William Martin, University of Leeds, UK, STORM Lab
+Date: 22 August 2020
+    Description: Detects center of colon lumen from colonoscope images
+    Contact: eljm@leeds.ac.uk
+    Publication: Enabling the future of colonoscopy with intelligent and autonomous magnetic manipulation,
+    Nature Machine Intelligence
+"""
 
 import numpy as np
 import cv2
-import warnings
+import os
 
 
 class LumenDetection(object):
     def __init__(self):
-        using_video_file = False
+        using_video_file = True
 
         if using_video_file:
-            self.video_capture = cv2.VideoCapture('/home/path/to/video.mp4')
+            path = os.getcwd()
+            self.video_capture = cv2.VideoCapture(path + '/video.mp4')
         else:
             self.video_capture = cv2.VideoCapture(0)
 
@@ -19,54 +28,60 @@ class LumenDetection(object):
         self.feature_detector = cv2.FastFeatureDetector_create()
         # the presence of a lumen will return a high number of detected features
         # adjust this threshold to
-        self.features_threshold = 1
+        self.features_threshold = 150
         # set this flag to true in order to see the detected features in the current frame
-        self.draw_features = True
+        self.draw_features = False
 
     def control_loop(self):
         while True:
             # get next video frame
             ret, frame = self.video_capture.read()
+            scale = 2
+            w = int(frame.shape[1] / scale)
+            h = int(frame.shape[0] / scale)
+            frame = cv2.pyrDown(frame, dstsize=(w, h))
 
             # check if high number of features indicate a lumen to segment
             features = self.feature_detector.detect(frame, None)
             if len(features) < self.features_threshold:
-                warnings.warn('No lumen present in current frame')
-                self.display_video(frame, features)
+                self.display_video(frame, features, None)
             else:
+                # valid lumen present, segment image
                 segmented_frame = self.segment(frame)
                 blurred = cv2.GaussianBlur(segmented_frame, (5, 5), 0)
 
-                grey = self.BGRtoGRAY(blurred)
+                grey = self.bgr_2_grey(blurred)
                 # Leave darkest pixels
                 grey[grey > (grey.min() + 15)] = 0
 
-                x, y = self.getCenter(grey)
+                x, y = self.get_center(grey)
                 result = cv2.circle(frame, (x, y), 10, (0, 255, 0), -1)
-                self.display_video(frame, None)
+                self.display_video(result, None, segmented_frame)
 
-    def display_video(self, frame, features):
+    def display_video(self, frame, features, segmented):
         if self.draw_features and features is not None:
             frame = cv2.drawKeypoints(frame, features, None, color=(0, 255, 0), flags=0)
 
-        cv2.imshow('frame', frame)
+        if segmented is not None:
+            cv2.imshow('frame', np.hstack([frame, segmented]))
+        else:
+            blank = np.ones([int(frame.shape[0]), int(frame.shape[1]), 3]) * 255
+            cv2.imshow('frame', np.hstack([frame, blank]))
+
         if cv2.waitKey(1) & 0xFF == ord('q'):
             self.video_capture.release()
             cv2.destroyAllWindows()
 
-    def getCenter(self, grey):
+    @staticmethod
+    def get_center(grey):
 
-        M = cv2.moments(grey)
+        m = cv2.moments(grey)
+        x = int(m["m10"] / m["m00"])
+        y = int(m["m01"] / m["m00"])
+        return x, y
 
-        cnts = cv2.findContours(grey.copy(), cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)[-2]
-        c = max(cnts, key=cv2.contourArea)
-        ((x, y), radius) = cv2.minEnclosingCircle(c)
-
-        cX = int(M["m10"] / M["m00"])
-        cY = int(M["m01"] / M["m00"])
-        return cX, cY
-
-    def BGRtoGRAY(self, image):
+    @staticmethod
+    def bgr_2_grey(image):
         grey = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
         return grey
 
@@ -80,9 +95,9 @@ class LumenDetection(object):
         r[:, :, 1] = 0
 
         # Convert to greyscale
-        grey = self.BGRtoGRAY(r)
+        grey = self.bgr_2_grey(r)
 
-        # Downsample 1/2 x 1/2
+        # Down sample 1/2 x 1/2
         scale = 2
         w = int(grey.shape[1] / scale)
         h = int(grey.shape[0] / scale)
@@ -166,9 +181,9 @@ class LumenDetection(object):
         grey_masked = cv2.bitwise_and(temp_img, temp_img, mask=mask_inv)
 
         # Find contours in masked image and get largest region
-        cnts = cv2.findContours(grey_masked.copy(), cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)[-2]
+        contours = cv2.findContours(grey_masked.copy(), cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)[-2]
         mask = np.ones(frame.shape[:2], dtype="uint8") * 255
-        c = max(cnts, key=cv2.contourArea)
+        c = max(contours, key=cv2.contourArea)
 
         # Mask to leave only the largest thresholded region
         mask_cnt = cv2.drawContours(mask, [c], -1, 0, -1)
@@ -177,7 +192,7 @@ class LumenDetection(object):
 
         ## Zabulis et al.
         smax = 0
-        for i in cnts:
+        for i in contours:
             A = cv2.contourArea(i)
 
             if A != 0 and cv2.arcLength(i, True) != 0:
