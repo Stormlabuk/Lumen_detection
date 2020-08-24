@@ -28,7 +28,7 @@ class LumenDetection(object):
         self.feature_detector = cv2.FastFeatureDetector_create()
         # the presence of a lumen will return a high number of detected features
         # adjust this threshold to
-        self.features_threshold = 150
+        self.features_threshold = 175
         # set this flag to true in order to see the detected features in the current frame
         self.draw_features = False
 
@@ -65,8 +65,7 @@ class LumenDetection(object):
         if segmented is not None:
             cv2.imshow('frame', np.hstack([frame, segmented]))
         else:
-            blank = np.ones([int(frame.shape[0]), int(frame.shape[1]), 3]) * 255
-            cv2.imshow('frame', np.hstack([frame, blank]))
+            cv2.imshow('frame', np.hstack([frame, frame]))
 
         if cv2.waitKey(1) & 0xFF == ord('q'):
             self.video_capture.release()
